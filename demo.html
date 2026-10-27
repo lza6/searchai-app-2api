@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SearchAI · 人肉搜索 AI — Demo</title>
+<style>
+:root{--bg:#0b0f19;--card:#141a2b;--acc:#4f8cff;--ok:#3ddc84;--warn:#ffb74d}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:#e8ecf4;font-family:"Segoe UI",system-ui,sans-serif;min-height:100vh;padding:24px}
+.wrap{max-width:860px;margin:0 auto}
+h1{font-size:22px;margin-bottom:4px}
+h1 span{color:var(--acc)}
+.sub{color:#8a93a6;font-size:13px;margin-bottom:20px}
+.card{background:var(--card);border-radius:12px;padding:18px;margin-bottom:16px;border:1px solid #232c42}
+label{display:block;font-size:12px;color:#8a93a6;margin:10px 0 4px}
+input,textarea{width:100%;background:#0e1424;border:1px solid #2a3552;color:#e8ecf4;border-radius:8px;padding:10px 12px;font-size:14px}
+textarea{resize:vertical;min-height:70px}
+button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:11px 22px;font-size:14px;cursor:pointer;margin-top:12px}
+button:disabled{opacity:.5;cursor:wait}
+button.ghost{background:transparent;border:1px solid #2a3552}
+.pill{display:inline-block;font-size:11px;padding:2px 10px;border-radius:99px;margin-left:8px;vertical-align:2px}
+.pill.ok{background:#123524;color:var(--ok)} .pill.warn{background:#3a2c12;color:var(--warn)}
+.answer{white-space:pre-wrap;line-height:1.7;font-size:14px}
+.mono{font-family:Consolas,monospace;font-size:12px;color:#9fb0d0;word-break:break-all}
+.err{color:#ff7a7a;font-size:13px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.hist{padding:8px 0;border-bottom:1px dashed #232c42;font-size:13px}
+.status{font-size:13px;color:#8a93a6;margin-top:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🔎 SearchAI <span>Deep-Search Demo</span><span id="hp" class="pill warn">checking…</span></h1>
+  <div class="sub">上游 appss.airy365.com · AES-GCM(vs) 协议还原 · 端口 8918 · 面板仅供协议验证</div>
+
+  <div class="card">
+    <label>搜索问题 (searchTitle) *</label>
+    <textarea id="q" placeholder="What is the complete biography of [person]?">What is Elon Musk's career history?</textarea>
+    <div class="grid">
+      <div><label>出生日期 (可选, DD-MM-YYYY)</label><input id="b" placeholder="28-06-1971"></div>
+      <div><label>地点 (可选)</label><input id="l" placeholder="Pretoria, South Africa"></div>
+    </div>
+    <label>职业背景 (可选)</label><input id="p" placeholder="Entrepreneur">
+    <button id="go" onclick="run()">🚀 创建搜索任务</button>
+    <button class="ghost" onclick="acct()">👤 当前账号</button>
+    <button class="ghost" onclick="hist()">📜 历史记录</button>
+    <div id="st" class="status"></div>
+  </div>
+
+  <div class="card" id="resCard" style="display:none">
+    <label>结果 <span id="sid" class="mono"></span></label>
+    <div id="res" class="answer"></div>
+  </div>
+
+  <div class="card" id="histCard" style="display:none"><label>历史 (最近 30 条)</label><div id="hist"></div></div>
+
+  <div class="card">
+    <label>API</label>
+    <div class="mono">POST /v1/search/ai {prompt, birthDate?, location?, professionalBackground?} → 同步等待 answer[]<br>
+    POST /v1/search/ai/task {searchId} · POST /v1/search/ai/history {page} · GET /v1/models /health /stats<br>
+    POST /proxy/&lt;上游任意 /search/ai/* 或 /app/* 路径&gt; 原生透传(自动加解密 vs)</div>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+fetch('/health').then(r=>r.json()).then(j=>{const p=$('hp');p.textContent='up · '+j.upstream_reqs+' upstream reqs';p.className='pill ok'}).catch(()=>$('hp').textContent='down');
+async function acct(){const r=await(await fetch('/v1/account',{method:'POST'})).json();
+  $('resCard').style.display='block';$('sid').textContent='';$('res').textContent=JSON.stringify(r.result??r,null,2)}
+async function hist(){const r=await(await fetch('/v1/search/ai/history',{method:'POST',headers:{'Content-Type':'application/json'},body:'{"page":1}'})).json();
+  $('histCard').style.display='block';const o=r.result?.object??[];
+  $('hist').innerHTML=o.map(x=>`<div class="hist">🗂 ${x.searchTitle} <span class="mono">${x.searchId}</span></div>`).join('')||'<div class="err">空</div>'}
+async function run(){
+  const btn=$('go');btn.disabled=true;$('resCard').style.display='block';$('res').textContent='⏳ 创建任务…';
+  $('st').textContent='';
+  try{
+    const r=await fetch('/v1/search/ai',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({prompt:$('q').value,birthDate:$('b').value,location:$('l').value,professionalBackground:$('p').value})});
+    const j=await r.json();
+    if(!r.ok)throw new Error(JSON.stringify(j).slice(0,300));
+    $('sid').textContent=j.searchId;
+    const tick=setInterval(async()=>{const t=await(await fetch('/v1/search/ai/task',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({searchId:j.searchId})})).json();
+      const s=t.result?.status;if(s)$('st').textContent='上游状态: '+s},4000);
+    $('st').textContent='上游状态: '+(j.status||'PENDING');
+    $('res').textContent=j.answer?.length?j.answer.join('\n\n'):'(空)';
+    clearInterval(tick);$('st').textContent='完成: '+j.status;
+  }catch(e){$('res').innerHTML='<div class="err">❌ '+e.message+'</div>'}
+  btn.disabled=false;
+}
+</script>
+</body>
+</html>
